@@ -1,20 +1,21 @@
 @echo off
-REM ──────────────────────────────────────────────────────────────────────────────
-REM  update_frontend.cmd  –  Sync placeholders, upload to S3, invalidate CF
-REM  • Requires Terraform & AWS-CLI in PATH
-REM  • Works whether you launch it from project root, terraform folder, VS Code, etc.
-REM ──────────────────────────────────────────────────────────────────────────────
+REM ---------------------------------------------------------------------------
+REM  update_api_url.cmd - Sync placeholders, upload to S3, invalidate CloudFront
+REM  Requires Terraform & AWS-CLI in PATH
+REM  Works whether you launch it from project root, terraform folder or VS Code
+REM ---------------------------------------------------------------------------
+
 setlocal EnableDelayedExpansion
 set ERRLEV=0
 
-REM ── 1. Discover directories (same logic as Bash) ─────────────────────────────
-set "SCRIPT_DIR=%~dp0"                           REM always ends with '\'
-for %%i in ("%SCRIPT_DIR%\..") do set "PROJECT_ROOT=%%~fi"
+REM -- 1. Discover directories (same logic as bash) ----------------------------
+set "SCRIPT_DIR=%~dp0"
+for %%i in ("%SCRIPT_DIR%..") do set "PROJECT_ROOT=%%~fi"
 
 set "TERRAFORM_PATH=%PROJECT_ROOT%\terraform"
 set "FRONTEND_PATH=%PROJECT_ROOT%\frontend"
 
-REM ── 2. Helper : function to read Terraform outputs ---------------------------
+REM -- 2. Helper : function to read Terraform outputs -------------------------
 for %%# in (api_url cognito_user_pool_id cognito_client_id cloudfront_url bucket_name) do call :GET_TF %%#
 
 if not defined api_url            (echo [ERROR] api_url missing        & set ERRLEV=1)
@@ -29,7 +30,7 @@ echo USER_POOL_ID = %cognito_user_pool_id%
 echo CLIENT_ID    = %cognito_client_id%
 echo BUCKET_NAME  = %bucket_name%
 
-REM ── 3. Extract CloudFront domain (strip protocol + path) ----------------------
+REM -- 3. Extract CloudFront domain ------------------------------------------
 set "TMP=%cloudfront_url:https://=%"
 for /f "tokens=1 delims=/" %%d in ("%TMP%") do set "CLOUDFRONT_DOMAIN=%%d"
 if not defined CLOUDFRONT_DOMAIN (
@@ -37,8 +38,8 @@ if not defined CLOUDFRONT_DOMAIN (
     exit /b 1
 )
 
-REM ── 4. Replace placeholders in frontend files (PowerShell one-liner) ----------
-echo Updating placeholders …
+REM -- 4. Replace placeholders in frontend files ------------------------------
+echo Updating placeholders...
 call :PS_REPLACE "%FRONTEND_PATH%\app.js"    REPLACE_WITH_API_URL      "%api_url%"
 call :PS_REPLACE "%FRONTEND_PATH%\app.js"    REPLACE_WITH_USER_POOL_ID "%cognito_user_pool_id%"
 call :PS_REPLACE "%FRONTEND_PATH%\app.js"    REPLACE_WITH_CLIENT_ID    "%cognito_client_id%"
@@ -50,48 +51,40 @@ call :PS_REPLACE "%FRONTEND_PATH%\index.html" REPLACE_WITH_API_URL      "%api_ur
 call :PS_REPLACE "%FRONTEND_PATH%\index.html" REPLACE_WITH_USER_POOL_ID "%cognito_user_pool_id%"
 call :PS_REPLACE "%FRONTEND_PATH%\index.html" REPLACE_WITH_CLIENT_ID    "%cognito_client_id%"
 
-echo ✓ Frontend files updated
+echo Frontend files updated
 
-REM ── 5. Upload to S3 -----------------------------------------------------------
-echo Uploading files to bucket %bucket_name% …
+REM -- 5. Upload to S3 --------------------------------------------------------
+echo Uploading files to bucket %bucket_name%...
 aws s3 cp "%FRONTEND_PATH%\index.html" "s3://%bucket_name%/index.html" --content-type text/html
 aws s3 cp "%FRONTEND_PATH%\app.js"     "s3://%bucket_name%/app.js"     --content-type application/javascript
 aws s3 cp "%FRONTEND_PATH%\login.html" "s3://%bucket_name%/login.html" --content-type text/html
-echo ✓ Files uploaded
+echo Files uploaded
 
-REM ── 6. CloudFront invalidation (only if resource exists in state) ------------
-for /f "usebackq tokens=*" %%k in (`terraform -chdir="%TERRAFORM_PATH%" ^
-        state list aws_cloudfront_distribution.frontend 2^>nul`) do set "CF_STATE=%%k"
+REM -- 6. CloudFront invalidation --------------------------------------------
+for /f "usebackq tokens=*" %%k in (`terraform -chdir="%TERRAFORM_PATH%" state list aws_cloudfront_distribution.frontend 2^>nul`) do set "CF_STATE=%%k"
 
 if defined CF_STATE (
-    for /f "usebackq tokens=* delims=" %%j in (`
-        aws cloudfront list-distributions ^
-            --query "DistributionList.Items[?DomainName=='%CLOUDFRONT_DOMAIN%'].Id" ^
-            --output text 2^>nul`) do set "DIST_ID=%%j"
+    for /f "usebackq tokens=* delims=" %%j in (`aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='%CLOUDFRONT_DOMAIN%'].Id" --output text 2^>nul`) do set "DIST_ID=%%j"
     if defined DIST_ID (
-        echo Creating CloudFront invalidation for %DIST_ID% …
+        echo Creating CloudFront invalidation for %DIST_ID%...
         aws cloudfront create-invalidation --distribution-id %DIST_ID% --paths "/*" >nul
-        echo ✓ CloudFront cache invalidated
+        echo CloudFront cache invalidated
     ) else (
-        echo [WARN] Distribution ID could not be determined – skipping invalidation
+        echo [WARN] Distribution ID could not be determined - skipping invalidation
     )
 ) else (
-    echo CloudFront distribution not found in Terraform state – skipping invalidation
+    echo CloudFront distribution not found in Terraform state - skipping invalidation
 )
 
 echo Done.
 exit /b 0
 
-REM ──────────────────────────────────────────────────────────────────────────────
-REM  Sub-routines
-REM ──────────────────────────────────────────────────────────────────────────────
+REM -- Sub-routines -----------------------------------------------------------
 :GET_TF
-REM   %1 = output name   (sets variable of same name)
 for /f "usebackq delims=" %%o in (`terraform -chdir="%TERRAFORM_PATH%" output -raw %1 2^>nul`) do set "%1=%%o"
 goto :eof
 
 :PS_REPLACE
-REM   %1 = file   %2 = placeholder   %3 = replacement value
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass ^
-  -Command "(Get-Content -Path '%~1') -replace '%~2', %3 | Set-Content -Path '%~1'"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content -Path '%~1') -replace '%~2', '%~3' | Set-Content -Path '%~1'"
 goto :eof
+
