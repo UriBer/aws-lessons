@@ -35,17 +35,23 @@ if [ -z "$CLOUDFRONT_DOMAIN" ]; then
 fi
 
 # Update app.js, login.html, and index.html
-# Use absolute paths for sed
-sed -i '' -e "s|REPLACE_WITH_API_URL|${API_URL}|g" "${FRONTEND_PATH}/app.js"
-sed -i '' -e "s|REPLACE_WITH_USER_POOL_ID|${USER_POOL_ID}|g" "${FRONTEND_PATH}/app.js"
-sed -i '' -e "s|REPLACE_WITH_CLIENT_ID|${CLIENT_ID}|g" "${FRONTEND_PATH}/app.js"
+# Use a cross-platform approach for in-place edits
+replace_placeholder() {
+  local file=$1 pattern=$2 value=$3
+  sed -i.bak -e "s|${pattern}|${value}|g" "$file"
+  rm -f "${file}.bak"
+}
 
-sed -i '' -e "s|REPLACE_WITH_USER_POOL_ID|${USER_POOL_ID}|g" "${FRONTEND_PATH}/login.html"
-sed -i '' -e "s|REPLACE_WITH_CLIENT_ID|${CLIENT_ID}|g" "${FRONTEND_PATH}/login.html"
+replace_placeholder "${FRONTEND_PATH}/app.js" "REPLACE_WITH_API_URL" "${API_URL}"
+replace_placeholder "${FRONTEND_PATH}/app.js" "REPLACE_WITH_USER_POOL_ID" "${USER_POOL_ID}"
+replace_placeholder "${FRONTEND_PATH}/app.js" "REPLACE_WITH_CLIENT_ID" "${CLIENT_ID}"
 
-sed -i '' -e "s|REPLACE_WITH_API_URL|${API_URL}|g" "${FRONTEND_PATH}/index.html"
-sed -i '' -e "s|REPLACE_WITH_USER_POOL_ID|${USER_POOL_ID}|g" "${FRONTEND_PATH}/index.html"
-sed -i '' -e "s|REPLACE_WITH_CLIENT_ID|${CLIENT_ID}|g" "${FRONTEND_PATH}/index.html"
+replace_placeholder "${FRONTEND_PATH}/login.html" "REPLACE_WITH_USER_POOL_ID" "${USER_POOL_ID}"
+replace_placeholder "${FRONTEND_PATH}/login.html" "REPLACE_WITH_CLIENT_ID" "${CLIENT_ID}"
+
+replace_placeholder "${FRONTEND_PATH}/index.html" "REPLACE_WITH_API_URL" "${API_URL}"
+replace_placeholder "${FRONTEND_PATH}/index.html" "REPLACE_WITH_USER_POOL_ID" "${USER_POOL_ID}"
+replace_placeholder "${FRONTEND_PATH}/index.html" "REPLACE_WITH_CLIENT_ID" "${CLIENT_ID}"
 
 echo "Updated app.js, login.html, and index.html"
 
